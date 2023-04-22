@@ -28,7 +28,6 @@ double q_integral(double left, double right, double f_left, double f_right, doub
 	double r_integral = (f_mid + f_right) * (right - mid) / 2;
 	if (abs((l_integral + r_integral) - intgrl_now) > EPS)
 	{ // Рекурсия для интегрирования обоих значений
-
 		l_integral = q_integral(left, mid, f_left, f_mid, l_integral);
 		r_integral = q_integral(mid, right, f_mid, f_right, r_integral);
 	}
@@ -36,20 +35,46 @@ double q_integral(double left, double right, double f_left, double f_right, doub
 	return (l_integral + r_integral);
 }
 
-int counter(void *ptrl, void *ptrr, sem_t *sem)
+int counter()
 {
+	sem_t *sem; // указатель на семафор
+
+	sem = sem_open("sem", O_CREAT, 0666, 1); // открытие существующего именованного семафора
+	if (sem == SEM_FAILED)
+	{ // проверка успешности открытия
+		perror("sem_open");
+		exit(EXIT_FAILURE);
+	}
+
+	const int SIZE = 4096;
+	const char *namel = "left";
+	int shm_fdl;
+	void *ptrl;
+	shm_fdl = shm_open(namel, O_RDONLY, 0666);
+	ptrl = mmap(0, SIZE, PROT_READ, MAP_SHARED, shm_fdl, 0);
+
+	const char *namer = "right";
+	int shm_fdr;
+	void *ptrr;
+	shm_fdr = shm_open(namer, O_RDONLY, 0666);
+	ptrr = mmap(0, SIZE, PROT_READ, MAP_SHARED, shm_fdr, 0);
+
 	float left;
 	float right;
 	do
 	{
-		float left = (char *)ptrl;
-		float right = (char *)ptrr;
+		float left = atof((char *)ptrl);
+		float right = atof((char *)ptrr);
 		sem_post(sem);
 		double area = q_integral(left, right, f(left), f(right), (f(left) + f(right)) * (right - left) / 2);
 		printf("%lf\n", area);
 	} while (left != -1 && right != -1);
 	sprintf(ptrl, "%f", left);
 	sprintf(ptrr, "%f", right);
+
+	sem_close(sem);
+	shm_unlink(namer);
+	shm_unlink(namel);
 	exit(0);
 }
 
@@ -60,7 +85,7 @@ int main(int argc, char **argv)
 		printf("Less then 1 argument");
 		return 0;
 	}
-	const char *sem_name = "/semaphore";
+	const char *sem_name = "sem";
 	sem_t *sem;
 	if ((sem = sem_open(sem_name, O_CREAT, 0666, 0)) == 0)
 	{
@@ -103,11 +128,11 @@ int main(int argc, char **argv)
 
 	if (fork())
 	{
-		counter(ptrl, ptrr, sem);
+		counter(sem);
 	}
 	if (fork())
 	{
-		counter(ptrl, ptrr, sem);
+		counter(sem);
 	}
 
 	for (size_t i = 0; i < part_count; i++)
@@ -134,8 +159,9 @@ int main(int argc, char **argv)
 	if (sem_unlink(sem_name) == -1)
 	{
 		perror("sem_unlink: Incorrect unlink of full semaphore");
-		// exit(-1);
+		exit(-1);
 	};
-
+	shm_unlink(namer);
+	shm_unlink(namel);
 	return 0;
 }
