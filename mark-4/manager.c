@@ -16,7 +16,7 @@ pthread_mutex_t mutex;
 
 double f(double x)
 {
-	return fun_param_1 * x * x * x + fun_param_2 * x * x + fun_param_3 * x;
+	return abs(fun_param_1 * x * x * x + fun_param_2 * x * x + fun_param_3 * x);
 }
 
 double q_integral(double left, double right, double f_left, double f_right, double intgrl_now)
@@ -144,37 +144,35 @@ int main(int argc, char **argv)
 	float b = 2;
 	int temp = 0, sum = 0;
 	int part_count = atoi(argv[1]);
-	// int part_count = 10;
+	int process_count = (part_count / 2) % 5;
+
 	int SIZE = 256;
 
 	const char *namel = "left";
 	const char *namer = "right";
 	const char *names1 = "s1";
 	const char *names2 = "s2";
-	/* shared memory file descriptor */
+
 	int shm_fdl;
 	int shm_fdr;
 	int shm_fds1;
 	int shm_fds2;
 
-	/* pointer to shared memory object */
 	void *ptrl;
 	void *ptrr;
 	void *ptrs1;
 	void *ptrs2;
-	/* create the shared memory object */
+
 	shm_fdl = shm_open(namel, O_CREAT | O_RDWR, 0666);
 	shm_fdr = shm_open(namer, O_CREAT | O_RDWR, 0666);
 	shm_fds1 = shm_open(names1, O_CREAT | O_RDWR, 0666);
 	shm_fds2 = shm_open(names2, O_CREAT | O_RDWR, 0666);
 
-	/* configure the size of the shared memory object */
 	ftruncate(shm_fdl, SIZE);
 	ftruncate(shm_fdr, SIZE);
 	ftruncate(shm_fds1, SIZE);
 	ftruncate(shm_fds2, SIZE);
 
-	/* memory map the shared memory object */
 	ptrl = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fdl, 0);
 	ptrr = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fdr, 0);
 	ptrs1 = mmap(0, SIZE, PROT_WRITE | PROT_READ, MAP_SHARED, shm_fds1, 0);
@@ -191,7 +189,7 @@ int main(int argc, char **argv)
 	sprintf(ptrs2, "%f", 0.0);
 	int flag = 0;
 
-	for (size_t i = 0; i < 2; i++)
+	for (size_t i = 0; i < process_count; i++)
 	{
 		if (fork())
 		{
@@ -221,7 +219,7 @@ int main(int argc, char **argv)
 	sprintf(ptrr, "%f", right);
 
 	float res;
-	while (atof((char *)ptrs2) != 2)
+	while (atof((char *)ptrs2) != process_count)
 	{
 		sleep(1);
 	}
