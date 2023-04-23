@@ -102,10 +102,7 @@ void counter()
 		pthread_mutex_unlock(&mutex);
 		double area = q_integral(left, right, f(left), f(right), (f(left) + f(right)) * (right - left) / 2);
 		sum += area;
-		printf("%f\t%f\n", left, right);
 	} while (left != -1 && right != -1);
-
-	printf("I was exit\n");
 
 	float t;
 	sscanf(ptrs1, "%f", &t);
@@ -225,7 +222,6 @@ int main(int argc, char **argv)
 	}
 
 	sscanf(ptrs1, "%f", &res);
-	printf("%f", res);
 	FILE *output = fopen("output.txt", "w");
 
 	fprintf(output, "%f", res);
