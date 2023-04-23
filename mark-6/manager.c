@@ -8,14 +8,18 @@
 #include <pthread.h>
 #include <sys/mman.h>
 
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/sem.h>
+
 float EPS = 0.01;
 float fun_param_1;
 float fun_param_2;
 float fun_param_3;
+pthread_mutex_t mutex;
 
-sem_t *sem;
-sem_t *semc1;
-sem_t *semf;
+int semid;
+int semid2;
 
 double f(double x)
 {
@@ -73,7 +77,14 @@ void counter()
 	double sum = 0;
 	do
 	{
-		sem_wait(sem);
+		struct sembuf parent_buf =
+			{.sem_num = 0, .sem_op = -1, .sem_flg = 0};
+
+		if (semop(semid, &parent_buf, 1) < 0)
+		{
+			printf("Can\'t sub 1 from semaphor\n");
+			exit(-1);
+		}
 
 		float left = atof((char *)ptrl);
 		float right = atof((char *)ptrr);
@@ -82,47 +93,69 @@ void counter()
 		{
 			break;
 		}
-		sem_post(semc1);
-		double area = q_integral(left, right, f(left), f(right), (f(left) + f(right)) * (right - left) / 2);
-		sum += area;
-		printf("%f\t%f\t : %f\n", left, right, area);
 
+		struct sembuf child_buf =
+			{.sem_num = 0, .sem_op = 1, .sem_flg = 0};
+
+		if (semop(semid2, &child_buf, 1) < 0)
+		{
+			printf("Can\'t add 1 to semaphor\n");
+			exit(-1);
+		}
+
+		double area = q_integral(left, right, f(left), f(right), (f(left) + f(right)) * (right - left) / 2);
+		printf("%f\t%f\t : %f\n", left, right, area);
+		sum += area;
 	} while (left != -1 && right != -1);
 
-	printf("I was exit\n");
 	float t;
 	sscanf(ptrs1, "%f", &t);
 	sprintf(ptrs1, "%f", t + sum);
+
 	sscanf(ptrs2, "%f", &t);
 	sprintf(ptrs2, "%f", t + 1);
-	fflush(NULL);
 
 	shm_unlink(namer);
 	shm_unlink(namel);
-	sem_post(semf);
 }
 
 int main(int argc, char **argv)
 {
-	sem = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-	semc1 = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-	semf = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-
-	sem_init(sem, 1, 0);
-	sem_init(semc1, 1, 1);
-	sem_init(semf, 1, 0);
-
 	if (argc < 2)
 	{
 		printf("Less then 1 argument");
 		return 0;
 	}
 
+	const char *sem_name = "sem1";
+	const char *semc1_name = "sem2";
+
+	srand(time(NULL));
+	key_t key = ftok(sem_name, rand());
+	key_t key2 = ftok(semc1_name, rand());
+
+	struct sembuf mybuf;
+
+	if ((semid = semget(key, 1, 0666 | IPC_CREAT | IPC_EXCL)) < 0)
+	{
+		printf("Can\'t create semaphore1\n");
+		return -1;
+	}
+
+	if ((semid2 = semget(key2, 1, 0666 | IPC_CREAT | IPC_EXCL)) < 0)
+	{
+		printf("Can\'t create semaphore2\n");
+		return -1;
+	}
+
+	semctl(semid, 0, SETVAL, 0);
+	semctl(semid2, 0, SETVAL, 1);
+
 	float a = 0;
 	float b = 2;
-	int temp = 0, sum = 0;
+	int sum = 0;
 	int part_count = atoi(argv[1]);
-	int process_count = part_count / 2;
+	int process_count = (part_count / 2);
 
 	int SIZE = 256;
 
@@ -178,26 +211,52 @@ int main(int argc, char **argv)
 
 	for (size_t i = 0; i < part_count; i++)
 	{
-		sem_wait(semc1);
+		struct sembuf parent_buf =
+			{.sem_num = 0, .sem_op = -1, .sem_flg = 0};
+
+		if (semop(semid2, &parent_buf, 1) < 0)
+		{
+			printf("Can\'t sub 1 from semaphor\n");
+			exit(-1);
+		}
+
 		float left = ((b - a) / part_count) * i + a;
 		float right = ((b - a) / part_count) * (i + 1) + a;
-
 		sprintf(ptrl, "%f", left);
 		sprintf(ptrr, "%f", right);
-		sem_post(sem);
+
+		struct sembuf child_buf =
+			{.sem_num = 0, .sem_op = 1, .sem_flg = 0};
+
+		if (semop(semid, &child_buf, 1) < 0)
+		{
+			printf("Can\'t add 1 to semaphor\n");
+			exit(-1);
+		}
 	}
-	sem_wait(semc1);
+
+	struct sembuf parent_buf =
+		{.sem_num = 0, .sem_op = -1, .sem_flg = 0};
+
+	if (semop(semid2, &parent_buf, 1) < 0)
+	{
+		printf("Can\'t sub 1 from semaphor\n");
+		exit(-1);
+	}
+
 	sprintf(ptrl, "%f", -1.0);
 	sprintf(ptrr, "%f", -1.0);
 	for (size_t i = 0; i < part_count; i++)
 	{
-		sem_post(sem);
-	}
+		struct sembuf child_buf =
+			{.sem_num = 0, .sem_op = 1, .sem_flg = 0};
 
-	float left = -1;
-	float right = -1;
-	sprintf(ptrl, "%f", left);
-	sprintf(ptrr, "%f", right);
+		if (semop(semid, &child_buf, 1) < 0)
+		{
+			printf("Can\'t add 1 to semaphor\n");
+			exit(-1);
+		}
+	}
 
 	float res;
 	while (atof((char *)ptrs2) != process_count)
@@ -212,9 +271,18 @@ int main(int argc, char **argv)
 
 	fclose(output);
 
-	sem_destroy(sem);
-	sem_destroy(semf);
-	sem_destroy(semc1);
+	if (semctl(semid, 0, IPC_RMID, 0) < 0)
+	{
+		printf("Can\'t delete semaphore1\n");
+		return -1;
+	}
+
+	if (semctl(semid2, 0, IPC_RMID, 0) < 0)
+	{
+		printf("Can\'t delete semaphore2\n");
+		return -1;
+	}
+
 	shm_unlink(namer);
 	shm_unlink(namel);
 	return 0;
