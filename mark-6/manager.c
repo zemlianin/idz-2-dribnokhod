@@ -21,6 +21,29 @@ pthread_mutex_t mutex;
 int semid;
 int semid2;
 
+void handle_signal(int sig)
+{
+	const char *sem_name = "sem1";
+	const char *semc1_name = "sem2";
+	const char *namel = "left";
+	const char *namer = "right";
+
+	printf("Received signal %d\n", sig);
+	if (semctl(semid, 0, IPC_RMID, 0) < 0)
+	{
+		printf("Can\'t delete semaphore1\n");
+	}
+
+	if (semctl(semid2, 0, IPC_RMID, 0) < 0)
+	{
+		printf("Can\'t delete semaphore2\n");
+	}
+
+	shm_unlink(namer);
+	shm_unlink(namel);
+	exit(1);
+}
+
 double f(double x)
 {
 	return abs(fun_param_1 * x * x * x + fun_param_2 * x * x + fun_param_3 * x);
@@ -126,7 +149,7 @@ int main(int argc, char **argv)
 		printf("Less then 1 argument");
 		return 0;
 	}
-
+	signal(SIGINT, handle_signal);
 	const char *sem_name = "sem1";
 	const char *semc1_name = "sem2";
 

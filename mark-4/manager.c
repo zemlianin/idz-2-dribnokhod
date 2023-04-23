@@ -18,6 +18,36 @@ sem_t *sem;
 sem_t *semc1;
 sem_t *semf;
 
+void handle_signal(int sig)
+{
+	const char *namel = "left";
+	const char *namer = "right";
+	const char *names1 = "s1";
+	const char *names2 = "s2";
+	const char *sem_name = "sem100";
+	const char *semc1_name = "sem110";
+	const char *semf_name = "sem120";
+	printf("Received signal %d\n", sig);
+
+	if (sem_close(sem) == -1)
+	{
+		perror("sem_close: Incorrect close of busy semaphore");
+		exit(-1);
+	};
+	sem_close(semf) == -1;
+	sem_close(semc1) == -1;
+	if (sem_unlink(sem_name) == -1)
+	{
+		perror("sem_unlink: Incorrect unlink of full semaphore");
+		exit(-1);
+	};
+	sem_unlink(semc1_name) == -1;
+	sem_unlink(semf_name) == -1;
+	shm_unlink(namer);
+	shm_unlink(namel);
+	exit(1);
+}
+
 double f(double x)
 {
 	return abs(fun_param_1 * x * x * x + fun_param_2 * x * x + fun_param_3 * x);
@@ -126,6 +156,7 @@ int main(int argc, char **argv)
 		perror("sem_open: Can not create admin semaphore");
 		exit(-1);
 	};
+	signal(SIGINT, handle_signal);
 	float a = 0;
 	float b = 2;
 	int sum = 0;

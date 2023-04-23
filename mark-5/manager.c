@@ -17,6 +17,21 @@ sem_t *sem;
 sem_t *semc1;
 sem_t *semf;
 
+void handle_signal(int sig)
+{
+	const char *namel = "left";
+	const char *namer = "right";
+	const char *names1 = "s1";
+	const char *names2 = "s2";
+	printf("Received signal %d\n", sig);
+	sem_destroy(sem);
+	sem_destroy(semf);
+	sem_destroy(semc1);
+	shm_unlink(namer);
+	shm_unlink(namel);
+	exit(1);
+}
+
 double f(double x)
 {
 	return abs(fun_param_1 * x * x * x + fun_param_2 * x * x + fun_param_3 * x);
@@ -104,6 +119,7 @@ void counter()
 
 int main(int argc, char **argv)
 {
+	signal(SIGINT, handle_signal);
 	sem = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 	semc1 = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 	semf = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
