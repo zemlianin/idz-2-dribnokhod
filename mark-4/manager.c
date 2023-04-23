@@ -5,24 +5,14 @@
 #include <semaphore.h>
 #include <sys/wait.h>
 #include <fcntl.h>
-#include <sys/mman.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <string.h>
-#include <signal.h>
-#include <semaphore.h>
-#include <unistd.h>
-#include <stdio.h>
-#include <time.h>
-#include <stdlib.h>
+#include <pthread.h>
 #include <sys/mman.h>
 
 float EPS = 0.01;
 float fun_param_1;
 float fun_param_2;
 float fun_param_3;
+pthread_mutex_t mutex;
 
 double f(double x)
 {
@@ -49,11 +39,16 @@ double q_integral(double left, double right, double f_left, double f_right, doub
 
 int counter()
 {
-	sem_t *sem; // указатель на семафор
+	sem_t *sem;
+	sem_t *semc1;
+	sem_t *semf;
 
-	sem = sem_open("sem", O_CREAT, 0666, 1); // открытие существующего именованного семафора
+	sem = sem_open("sem", O_CREAT, 0666, 1);
+	semc1 = sem_open("semc1", O_CREAT, 0666, 1);
+	semf = sem_open("semf", O_CREAT, 0666, 1);
+
 	if (sem == SEM_FAILED)
-	{ // проверка успешности открытия
+	{
 		perror("sem_open");
 		exit(EXIT_FAILURE);
 	}
@@ -73,20 +68,34 @@ int counter()
 
 	float left;
 	float right;
+	double sum = 0;
 	do
 	{
+		pthread_mutex_lock(&mutex);
+		if (atof((char *)ptrl) == -1 || atof((char *)ptrr) == -1)
+		{
+			break;
+		}
+		sem_wait(semc1);
 		float left = atof((char *)ptrl);
+
 		float right = atof((char *)ptrr);
+		pthread_mutex_unlock(&mutex);
 		sem_post(sem);
 		double area = q_integral(left, right, f(left), f(right), (f(left) + f(right)) * (right - left) / 2);
-		printf("%lf\n", area);
+		sum += area;
+
 	} while (left != -1 && right != -1);
-	sprintf(ptrl, "%f", left);
-	sprintf(ptrr, "%f", right);
 
 	sem_close(sem);
+	sem_close(semc1);
 	shm_unlink(namer);
 	shm_unlink(namel);
+	printf("I am exit");
+
+	sem_post(semf);
+	sem_close(semf);
+	sem_unlink("semf");
 	exit(0);
 }
 
@@ -98,7 +107,12 @@ int main(int argc, char **argv)
 		return 0;
 	}
 	const char *sem_name = "sem";
+	pthread_mutex_init(&mutex, NULL);
 	sem_t *sem;
+	sem_t *semc1;
+	sem_t *semf;
+	semc1 = sem_open("semc1", O_CREAT, 0666, 1);
+	semf = sem_open("semf", O_CREAT, 0666, 1);
 	if ((sem = sem_open(sem_name, O_CREAT, 0666, 0)) == 0)
 	{
 		perror("sem_open: Can not create admin semaphore");
@@ -107,29 +121,41 @@ int main(int argc, char **argv)
 	float a = 0;
 	float b = 2;
 	int temp = 0, sum = 0;
-	// int count = atoi(argv[1]);
-	int part_count = 10;
+	int part_count = atoi(argv[1]);
+	// int part_count = 10;
 	int SIZE = 256;
 
 	const char *namel = "left";
 	const char *namer = "right";
+	const char *names1 = "s1";
+	const char *names2 = "s2";
 	/* shared memory file descriptor */
 	int shm_fdl;
 	int shm_fdr;
+	int shm_fds1;
+	int shm_fds2;
 
 	/* pointer to shared memory object */
 	void *ptrl;
 	void *ptrr;
+	void *ptrs1;
+	void *ptrs2;
 	/* create the shared memory object */
 	shm_fdl = shm_open(namel, O_CREAT | O_RDWR, 0666);
-	shm_fdl = shm_open(namer, O_CREAT | O_RDWR, 0666);
+	shm_fdr = shm_open(namer, O_CREAT | O_RDWR, 0666);
+	shm_fds1 = shm_open(names1, O_CREAT | O_RDWR, 0666);
+	shm_fds2 = shm_open(names2, O_CREAT | O_RDWR, 0666);
 
 	/* configure the size of the shared memory object */
 	ftruncate(shm_fdl, SIZE);
 	ftruncate(shm_fdr, SIZE);
+	ftruncate(shm_fds1, SIZE);
+	ftruncate(shm_fds2, SIZE);
 	/* memory map the shared memory object */
 	ptrl = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fdl, 0);
-	ptrl = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fdr, 0);
+	ptrr = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fdr, 0);
+	ptrs1 = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fds1, 0);
+	ptrs2 = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fds2, 0);
 
 	FILE *input = fopen("input.txt", "rt");
 
@@ -140,35 +166,42 @@ int main(int argc, char **argv)
 
 	if (fork())
 	{
-		counter(sem);
+		counter();
 	}
+
 	if (fork())
 	{
-		counter(sem);
+		counter();
 	}
 
 	for (size_t i = 0; i < part_count; i++)
 	{
 		float left = ((b - a) / part_count) * i + a;
 		float right = ((b - a) / part_count) * (i + 1) + a;
-
 		sprintf(ptrl, "%f", left);
 		sprintf(ptrr, "%f", right);
+		sem_post(semc1);
 		sem_wait(sem);
 	}
-	sleep(3);
+	float left = -1;
+	float right = -1;
+	sprintf(ptrl, "%f", left);
+	sprintf(ptrr, "%f", right);
+	sem_post(semc1);
+
+	sem_wait(semf);
 	FILE *output = fopen("output.txt", "w");
 
 	//	fprintf(output, "%f", q_integral(a, b, f(a), f(b), (f(a) + f(b)) * (b - a) / 2));
 
 	fclose(output);
 
-	if (sem_close(sem) == -1)
+	if (sem_close(sem) == -1 && sem_close(semf) == -1 && sem_close(semc1) == -1)
 	{
 		perror("sem_close: Incorrect close of busy semaphore");
 		exit(-1);
 	};
-	if (sem_unlink(sem_name) == -1)
+	if (sem_unlink(sem_name) == -1 && sem_unlink("semc1") == -1 && sem_unlink("semf") == -1)
 	{
 		perror("sem_unlink: Incorrect unlink of full semaphore");
 		exit(-1);
