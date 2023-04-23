@@ -37,7 +37,7 @@ double q_integral(double left, double right, double f_left, double f_right, doub
 	return (l_integral + r_integral);
 }
 
-int counter()
+void counter()
 {
 	sem_t *sem;
 	sem_t *semc1;
@@ -57,14 +57,26 @@ int counter()
 	const char *namel = "left";
 	int shm_fdl;
 	void *ptrl;
-	shm_fdl = shm_open(namel, O_RDONLY, 0666);
-	ptrl = mmap(0, SIZE, PROT_READ, MAP_SHARED, shm_fdl, 0);
+	shm_fdl = shm_open(namel, O_RDONLY | O_RDWR, 0666);
+	ptrl = mmap(0, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fdl, 0);
 
 	const char *namer = "right";
 	int shm_fdr;
 	void *ptrr;
-	shm_fdr = shm_open(namer, O_RDONLY, 0666);
-	ptrr = mmap(0, SIZE, PROT_READ, MAP_SHARED, shm_fdr, 0);
+	shm_fdr = shm_open(namer, O_RDONLY | O_RDWR, 0666);
+	ptrr = mmap(0, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fdr, 0);
+
+	const char *names1 = "s1";
+	int shm_fds1;
+	void *ptrs1;
+	shm_fds1 = shm_open(names1, O_RDONLY | O_RDWR, 0666);
+	ptrs1 = mmap(0, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fds1, 0);
+
+	const char *names2 = "s2";
+	int shm_fds2;
+	void *ptrs2;
+	shm_fds2 = shm_open(names2, O_RDONLY | O_RDWR, 0666);
+	ptrs2 = mmap(0, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fds2, 0);
 
 	float left;
 	float right;
@@ -72,31 +84,41 @@ int counter()
 	do
 	{
 		pthread_mutex_lock(&mutex);
-		if (atof((char *)ptrl) == -1 || atof((char *)ptrr) == -1)
+		if (left == -1 || right == -1)
 		{
+			pthread_mutex_unlock(&mutex);
 			break;
 		}
 		sem_wait(semc1);
 		float left = atof((char *)ptrl);
-
 		float right = atof((char *)ptrr);
-		pthread_mutex_unlock(&mutex);
 		sem_post(sem);
+		if (left == -1 || right == -1)
+		{
+			pthread_mutex_unlock(&mutex);
+			break;
+		}
+
+		pthread_mutex_unlock(&mutex);
 		double area = q_integral(left, right, f(left), f(right), (f(left) + f(right)) * (right - left) / 2);
 		sum += area;
-
+		printf("%f\t%f\n", left, right);
 	} while (left != -1 && right != -1);
 
-	sem_close(sem);
+	printf("I was exit\n");
+
+	float t;
+	sscanf(ptrs1, "%f", &t);
+	sprintf(ptrs1, "%f", t + sum);
+	sscanf(ptrs2, "%f", &t);
+	sprintf(ptrs2, "%f", t + 1);
+	fflush(NULL);
+	sem_post(semc1);
 	sem_close(semc1);
 	shm_unlink(namer);
 	shm_unlink(namel);
-	printf("I am exit");
-
 	sem_post(semf);
 	sem_close(semf);
-	sem_unlink("semf");
-	exit(0);
 }
 
 int main(int argc, char **argv)
@@ -151,11 +173,12 @@ int main(int argc, char **argv)
 	ftruncate(shm_fdr, SIZE);
 	ftruncate(shm_fds1, SIZE);
 	ftruncate(shm_fds2, SIZE);
+
 	/* memory map the shared memory object */
 	ptrl = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fdl, 0);
 	ptrr = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fdr, 0);
-	ptrs1 = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fds1, 0);
-	ptrs2 = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fds2, 0);
+	ptrs1 = mmap(0, SIZE, PROT_WRITE | PROT_READ, MAP_SHARED, shm_fds1, 0);
+	ptrs2 = mmap(0, SIZE, PROT_WRITE | PROT_READ, MAP_SHARED, shm_fds2, 0);
 
 	FILE *input = fopen("input.txt", "rt");
 
@@ -164,35 +187,50 @@ int main(int argc, char **argv)
 	fscanf(input, "%f", &fun_param_3);
 	fclose(input);
 
-	if (fork())
+	sprintf(ptrs1, "%f", 0.0);
+	sprintf(ptrs2, "%f", 0.0);
+	int flag = 0;
+
+	for (size_t i = 0; i < 2; i++)
 	{
-		counter();
+		if (fork())
+		{
+			counter();
+			exit(0);
+			sem_post(sem);
+			sem_close(sem);
+		}
 	}
 
-	if (fork())
-	{
-		counter();
-	}
-
-	for (size_t i = 0; i < part_count; i++)
+	for (size_t i = 0; i < part_count + 1; i++)
 	{
 		float left = ((b - a) / part_count) * i + a;
 		float right = ((b - a) / part_count) * (i + 1) + a;
+		if (i != 0)
+		{
+			sem_wait(sem);
+		}
+		sleep(1);
 		sprintf(ptrl, "%f", left);
 		sprintf(ptrr, "%f", right);
 		sem_post(semc1);
-		sem_wait(sem);
 	}
 	float left = -1;
 	float right = -1;
 	sprintf(ptrl, "%f", left);
 	sprintf(ptrr, "%f", right);
-	sem_post(semc1);
 
-	sem_wait(semf);
+	float res;
+	while (atof((char *)ptrs2) != 2)
+	{
+		sleep(1);
+	}
+
+	sscanf(ptrs1, "%f", &res);
+	printf("%f", res);
 	FILE *output = fopen("output.txt", "w");
 
-	//	fprintf(output, "%f", q_integral(a, b, f(a), f(b), (f(a) + f(b)) * (b - a) / 2));
+	fprintf(output, "%f", res);
 
 	fclose(output);
 
