@@ -14,6 +14,10 @@ float fun_param_2;
 float fun_param_3;
 pthread_mutex_t mutex;
 
+sem_t *sem;
+sem_t *semc1;
+sem_t *semf;
+
 double f(double x)
 {
 	return abs(fun_param_1 * x * x * x + fun_param_2 * x * x + fun_param_3 * x);
@@ -39,13 +43,6 @@ double q_integral(double left, double right, double f_left, double f_right, doub
 
 void counter()
 {
-	sem_t *sem;
-	sem_t *semc1;
-	sem_t *semf;
-
-	sem = sem_open("sem", O_CREAT, 0666, 1);
-	semc1 = sem_open("semc1", O_CREAT, 0666, 1);
-	semf = sem_open("semf", O_CREAT, 0666, 1);
 
 	if (sem == SEM_FAILED)
 	{
@@ -83,35 +80,27 @@ void counter()
 	double sum = 0;
 	do
 	{
-		pthread_mutex_lock(&mutex);
-		if (left == -1 || right == -1)
-		{
-			pthread_mutex_unlock(&mutex);
-			break;
-		}
-		sem_wait(semc1);
+		sem_wait(sem);
 		float left = atof((char *)ptrl);
 		float right = atof((char *)ptrr);
-		sem_post(sem);
+
 		if (left == -1 || right == -1)
 		{
-			pthread_mutex_unlock(&mutex);
 			break;
 		}
-
-		pthread_mutex_unlock(&mutex);
+		sem_post(semc1);
 		double area = q_integral(left, right, f(left), f(right), (f(left) + f(right)) * (right - left) / 2);
+		printf("%f\t%f\t : %f\n", left, right, area);
 		sum += area;
 	} while (left != -1 && right != -1);
 
 	float t;
 	sscanf(ptrs1, "%f", &t);
 	sprintf(ptrs1, "%f", t + sum);
+
 	sscanf(ptrs2, "%f", &t);
 	sprintf(ptrs2, "%f", t + 1);
-	fflush(NULL);
-	sem_post(semc1);
-	sem_close(semc1);
+
 	shm_unlink(namer);
 	shm_unlink(namel);
 	sem_post(semf);
@@ -125,13 +114,13 @@ int main(int argc, char **argv)
 		printf("Less then 1 argument");
 		return 0;
 	}
-	const char *sem_name = "sem";
-	pthread_mutex_init(&mutex, NULL);
-	sem_t *sem;
-	sem_t *semc1;
-	sem_t *semf;
-	semc1 = sem_open("semc1", O_CREAT, 0666, 1);
-	semf = sem_open("semf", O_CREAT, 0666, 1);
+
+	const char *sem_name = "sem100";
+	const char *semc1_name = "sem110";
+	const char *semf_name = "sem120";
+
+	semc1 = sem_open(semc1_name, O_CREAT, 0666, 1);
+	semf = sem_open(semf_name, O_CREAT, 0666, 0);
 	if ((sem = sem_open(sem_name, O_CREAT, 0666, 0)) == 0)
 	{
 		perror("sem_open: Can not create admin semaphore");
@@ -139,9 +128,9 @@ int main(int argc, char **argv)
 	};
 	float a = 0;
 	float b = 2;
-	int temp = 0, sum = 0;
+	int sum = 0;
 	int part_count = atoi(argv[1]);
-	int process_count = (part_count / 2) % 5;
+	int process_count = (part_count / 2);
 
 	int SIZE = 256;
 
@@ -192,28 +181,25 @@ int main(int argc, char **argv)
 		{
 			counter();
 			exit(0);
-			sem_post(sem);
-			sem_close(sem);
 		}
 	}
 
-	for (size_t i = 0; i < part_count + 1; i++)
+	for (size_t i = 0; i < part_count; i++)
 	{
+		sem_wait(semc1);
 		float left = ((b - a) / part_count) * i + a;
 		float right = ((b - a) / part_count) * (i + 1) + a;
-		if (i != 0)
-		{
-			sem_wait(sem);
-		}
-		sleep(1);
 		sprintf(ptrl, "%f", left);
 		sprintf(ptrr, "%f", right);
-		sem_post(semc1);
+		sem_post(sem);
 	}
-	float left = -1;
-	float right = -1;
-	sprintf(ptrl, "%f", left);
-	sprintf(ptrr, "%f", right);
+	sem_wait(semc1);
+	sprintf(ptrl, "%f", -1.0);
+	sprintf(ptrr, "%f", -1.0);
+	for (size_t i = 0; i < part_count; i++)
+	{
+		sem_post(sem);
+	}
 
 	float res;
 	while (atof((char *)ptrs2) != process_count)
@@ -228,16 +214,20 @@ int main(int argc, char **argv)
 
 	fclose(output);
 
-	if (sem_close(sem) == -1 && sem_close(semf) == -1 && sem_close(semc1) == -1)
+	if (sem_close(sem) == -1)
 	{
 		perror("sem_close: Incorrect close of busy semaphore");
 		exit(-1);
 	};
-	if (sem_unlink(sem_name) == -1 && sem_unlink("semc1") == -1 && sem_unlink("semf") == -1)
+	sem_close(semf) == -1;
+	sem_close(semc1) == -1;
+	if (sem_unlink(sem_name) == -1)
 	{
 		perror("sem_unlink: Incorrect unlink of full semaphore");
 		exit(-1);
 	};
+	sem_unlink(semc1_name) == -1;
+	sem_unlink(semf_name) == -1;
 	shm_unlink(namer);
 	shm_unlink(namel);
 	return 0;
